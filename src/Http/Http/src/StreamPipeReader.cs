@@ -79,6 +79,7 @@ namespace Microsoft.AspNetCore.Http
         /// <inheritdoc />
         public override void AdvanceTo(SequencePosition consumed, SequencePosition examined)
         {
+            if (!SequenceMarshal.TryGetReadOnlySequenceSegment(, out var startSegment, out var startIndex, out var endSegment, out var endIndex);
             AdvanceTo((BufferSegment)consumed.GetObject(), consumed.GetInteger(), (BufferSegment)examined.GetObject(), examined.GetInteger());
         }
 
