@@ -333,6 +333,7 @@ namespace Microsoft.AspNetCore.Http
 
         private BufferSegment CreateSegmentUnsynchronized()
         {
+            // TODO this can pool buffer segment objects
             return new BufferSegment();
         }
 
