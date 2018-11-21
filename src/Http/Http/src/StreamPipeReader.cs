@@ -87,7 +87,8 @@ namespace Microsoft.AspNetCore.Http
             }
 
             // Creating consumedSequence will throw an ArgumentOutOfRangeException if consumed/examined are invalid.
-            // We want the same check for netstandard too. 
+            // We want the same check for netstandard too.
+            // TODO this is significantly slower than just calling AdvanceTo().
             var consumedSequence = GetCurrentReadOnlySequence().Slice(consumed, examined);
 
 #if NETCOREAPP2_2
@@ -238,10 +239,7 @@ namespace Microsoft.AspNetCore.Http
                 }
                 catch (OperationCanceledException)
                 {
-                    lock (lockObject)
-                    {
-                        _internalTokenSource = null;
-                    }
+                    ClearOutCancellation();
 
                     if (cancellationToken.IsCancellationRequested)
                     {
@@ -252,6 +250,14 @@ namespace Microsoft.AspNetCore.Http
                 }
 
                 return new ReadResult(GetCurrentReadOnlySequence(), isCanceled, IsCompletedOrThrow());
+            }
+        }
+
+        private void ClearOutCancellation()
+        {
+            lock (lockObject)
+            {
+                _internalTokenSource = null;
             }
         }
 
@@ -281,10 +287,7 @@ namespace Microsoft.AspNetCore.Http
                 {
                     AllocateCommitHead();
 
-                    lock (lockObject)
-                    {
-                        _internalTokenSource = null;
-                    }
+                    ClearOutCancellation();
                 }
 
                 result = new ReadResult(
