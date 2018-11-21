@@ -364,6 +364,21 @@ namespace Microsoft.AspNetCore.Http.Tests
             Assert.Equal(20, result.Buffer.Length);
         }
 
+        [Fact]
+        public async Task ExamineEverythingResetsAfterSuccessfulRead()
+        {
+            Write(Encoding.ASCII.GetBytes(new string('a', 10000)));
+
+            var readResult = await Reader.ReadAsync();
+            Reader.AdvanceTo(readResult.Buffer.Start, readResult.Buffer.End);
+
+            var readResult2 = await Reader.ReadAsync();
+            Reader.AdvanceTo(readResult2.Buffer.GetPosition(2000));
+
+            var readResult3 = await Reader.ReadAsync();
+            Assert.Equal(6192, readResult3.Buffer.Length);
+        }
+
         private bool IsTaskWithResult<T>(ValueTask<T> task)
         {
             return task == new ValueTask<T>(task.Result);

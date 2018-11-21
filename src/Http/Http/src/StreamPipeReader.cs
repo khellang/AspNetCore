@@ -118,6 +118,8 @@ namespace Microsoft.AspNetCore.Http
 
             _consumedLength -= consumedBytes;
 
+            _examinedEverything = false;
+
             if (examinedSegment == _commitHead)
             {
                 // If we examined everything, we force ReadAsync to actually read from the underlying stream
@@ -233,7 +235,6 @@ namespace Microsoft.AspNetCore.Http
 #endif
                     _commitHead.End += length;
                     _consumedLength += length;
-                    _examinedEverything = false;
                 }
                 catch (OperationCanceledException)
                 {
