@@ -193,7 +193,7 @@ namespace Microsoft.AspNetCore.Http.Tests
             Write(Encoding.ASCII.GetBytes(new string('a', 10000)));
 
             var readResult = await Reader.ReadAsync();
-            Reader.AdvanceTo(new SequencePosition());
+            Reader.AdvanceTo(readResult.Buffer.Start);
             var readResult2 = await Reader.ReadAsync();
 
             Assert.Equal(readResult, readResult2);
@@ -211,7 +211,7 @@ namespace Microsoft.AspNetCore.Http.Tests
 
             Reader.CancelPendingRead();
             result = await Reader.ReadAsync();
-            Assert.Throws<InvalidOperationException>(() => Reader.AdvanceTo(buffer.End));
+            Assert.Throws<ArgumentOutOfRangeException>(() => Reader.AdvanceTo(buffer.End));
             Reader.AdvanceTo(result.Buffer.End);
         }
 

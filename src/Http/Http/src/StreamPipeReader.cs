@@ -79,35 +79,43 @@ namespace Microsoft.AspNetCore.Http
         /// <inheritdoc />
         public override void AdvanceTo(SequencePosition consumed, SequencePosition examined)
         {
-            if (!SequenceMarshal.TryGetReadOnlySequenceSegment(, out var startSegment, out var startIndex, out var endSegment, out var endIndex);
-            AdvanceTo((BufferSegment)consumed.GetObject(), consumed.GetInteger(), (BufferSegment)examined.GetObject(), examined.GetInteger());
-        }
+            ThrowIfCompleted();
 
-        private void AdvanceTo(BufferSegment consumedSegment, int consumedIndex, BufferSegment examinedSegment, int examinedIndex)
-        {
-            if (_isCompleted)
+            if (_readHead == null || _commitHead == null)
             {
-                throw new InvalidOperationException("Reading is not allowed after reader was completed.");
+                throw new InvalidOperationException("No data has been read into the StreamPipeReader.");
             }
 
-            if (consumedSegment == null)
+            // Creating consumedSequence will throw an ArgumentOutOfRangeException if consumed/examined are invalid.
+            // We want the same check for netstandard too. 
+            var currentSequence = new ReadOnlySequence<byte>(_readHead, _readIndex, _commitHead, _commitHead.End - _commitHead.Start);
+            var consumedSequence = currentSequence.Slice(consumed, examined);
+
+#if NETCOREAPP2_2
+            if (!SequenceMarshal.TryGetReadOnlySequenceSegment(consumedSequence, out var consumedSegment, out var consumedIndex, out var examinedSegment, out var examinedIndex))
             {
                 return;
             }
 
-            if (_readHead == null || _commitHead == null)
+            AdvanceTo((BufferSegment)consumedSegment, consumedIndex, (BufferSegment)examinedSegment, examinedIndex);
+#elif NETSTANDARD2_0
+            AdvanceTo((BufferSegment)consumed.GetObject(), consumed.GetInteger(), (BufferSegment)examined.GetObject(), examined.GetInteger());
+#else
+#error Target frameworks need to be updated.
+#endif
+        }
+
+        private void AdvanceTo(BufferSegment consumedSegment, int consumedIndex, BufferSegment examinedSegment, int examinedIndex)
+        {
+            if (consumedSegment == null)
             {
-                throw new InvalidOperationException("Pipe is already advanced past provided cursor.");
+                return;
             }
 
             var returnStart = _readHead;
             var returnEnd = consumedSegment;
                 
             var consumedBytes = new ReadOnlySequence<byte>(returnStart, _readIndex, consumedSegment, consumedIndex).Length;
-            if (_consumedLength - consumedBytes < 0)
-            {
-                throw new InvalidOperationException("Pipe is already advanced past provided cursor.");
-            }
 
             _consumedLength -= consumedBytes;
 
@@ -115,6 +123,7 @@ namespace Microsoft.AspNetCore.Http
             {
                 // If we examined everything, we force ReadAsync to actually read from the underlying stream
                 // instead of returning a ReadResult from TryRead.
+                // TODO do we care about covering if examinedSegment past end of sequence.
                 _examinedEverything = _commitHead != null ? examinedIndex == _commitHead.End - _commitHead.Start : examinedIndex == 0;
             }
 
@@ -145,7 +154,7 @@ namespace Microsoft.AspNetCore.Http
                 _readIndex = consumedIndex;
             }
 
-            // Remove all blocks that 
+            // Remove all blocks that are freed.
             while (returnStart != null && returnStart != returnEnd)
             {
                 returnStart.ResetMemory();
@@ -190,10 +199,7 @@ namespace Microsoft.AspNetCore.Http
         /// <inheritdoc />
         public override async ValueTask<ReadResult> ReadAsync(CancellationToken cancellationToken = default)
         {
-            if (_isCompleted)
-            {
-                throw new InvalidOperationException("Reading is not allowed after reader was completed.");
-            }
+            ThrowIfCompleted();
 
             // PERF: store InternalTokenSource locally to avoid querying it twice (which acquires a lock)
             var tokenSource = InternalTokenSource;
@@ -207,15 +213,21 @@ namespace Microsoft.AspNetCore.Http
             {
                 reg = cancellationToken.Register(state => ((StreamPipeReader)state).Cancel(), this);
             }
+
             using (reg)
             {
+                var isCanceled = false;
                 try
                 {
                     AllocateCommitHead();
 #if NETCOREAPP2_2
                     var length = await _readingStream.ReadAsync(_commitHead.AvailableMemory, tokenSource.Token);
 #elif NETSTANDARD2_0
-                    MemoryMarshal.TryGetArray<byte>(_commitHead.AvailableMemory, out var arraySegment);
+                    if (!MemoryMarshal.TryGetArray<byte>(_commitHead.AvailableMemory, out var arraySegment))
+                    {
+                        throw new InvalidCastException("Could not get byte[] from Memory.");
+                    }
+
                     var length = await _readingStream.ReadAsync(arraySegment.Array, 0, arraySegment.Count, tokenSource.Token);
 #else
 #error Target frameworks need to be updated.
@@ -223,9 +235,6 @@ namespace Microsoft.AspNetCore.Http
                     _commitHead.End += length;
                     _consumedLength += length;
                     _examinedEverything = false;
-
-                    var ros = new ReadOnlySequence<byte>(_readHead, _readIndex, _commitHead, _commitHead.End - _commitHead.Start);
-                    return new ReadResult(ros, isCanceled: false, IsCompletedOrThrow());
                 }
                 catch (OperationCanceledException)
                 {
@@ -239,41 +248,52 @@ namespace Microsoft.AspNetCore.Http
                         throw;
                     }
 
-                    var ros = new ReadOnlySequence<byte>(_readHead, _readIndex, _commitHead, _commitHead.End - _commitHead.Start);
-                    return new ReadResult(ros, isCanceled: true, IsCompletedOrThrow());
+                    isCanceled = true;
                 }
+
+                var ros = new ReadOnlySequence<byte>(_readHead, _readIndex, _commitHead, _commitHead.End - _commitHead.Start);
+                return new ReadResult(ros, isCanceled, IsCompletedOrThrow());
+            }
+        }
+
+        private void ThrowIfCompleted()
+        {
+            if (_isCompleted)
+            {
+                throw new InvalidOperationException("Reading is not allowed after reader was completed.");
             }
         }
 
         public override bool TryRead(out ReadResult result)
         {
+            ThrowIfCompleted();
+
             return TryReadInternal(InternalTokenSource, out result);
         }
 
         private bool TryReadInternal(CancellationTokenSource source, out ReadResult result)
         {
-            if (source.IsCancellationRequested)
+            var isCancellationRequested = source.IsCancellationRequested;
+            if (isCancellationRequested || _consumedLength > 0 && !_examinedEverything)
             {
                 // If TryRead/ReadAsync are called and cancellation is requested, we need to make sure memory is allocated for the ReadResult,
                 // otherwise if someone calls advance afterward on the ReadResult, it will throw.
-                AllocateCommitHead();
-
-                lock (lockObject)
+                if (isCancellationRequested)
                 {
-                    _internalTokenSource = null;
+                    AllocateCommitHead();
+
+                    lock (lockObject)
+                    {
+                        _internalTokenSource = null;
+                    }
                 }
 
-                result = new ReadResult(
-                    new ReadOnlySequence<byte>(_readHead, _readIndex, _commitHead, _commitHead.End - _commitHead.Start),
-                    isCanceled: true,
-                    IsCompletedOrThrow());
-                return true;
-            }
-
-            if (_consumedLength > 0 && !_examinedEverything)
-            {
                 var ros = new ReadOnlySequence<byte>(_readHead, _readIndex, _commitHead, _commitHead.End - _commitHead.Start);
-                result = new ReadResult(ros, isCanceled: false, IsCompletedOrThrow());
+
+                result = new ReadResult(
+                    ros,
+                    isCanceled: isCancellationRequested,
+                    IsCompletedOrThrow());
                 return true;
             }
 
