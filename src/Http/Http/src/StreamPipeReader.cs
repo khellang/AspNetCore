@@ -88,8 +88,7 @@ namespace Microsoft.AspNetCore.Http
 
             // Creating consumedSequence will throw an ArgumentOutOfRangeException if consumed/examined are invalid.
             // We want the same check for netstandard too. 
-            var currentSequence = new ReadOnlySequence<byte>(_readHead, _readIndex, _commitHead, _commitHead.End - _commitHead.Start);
-            var consumedSequence = currentSequence.Slice(consumed, examined);
+            var consumedSequence = GetCurrentReadOnlySequence().Slice(consumed, examined);
 
 #if NETCOREAPP2_2
             if (!SequenceMarshal.TryGetReadOnlySequenceSegment(consumedSequence, out var consumedSegment, out var consumedIndex, out var examinedSegment, out var examinedIndex))
@@ -251,8 +250,7 @@ namespace Microsoft.AspNetCore.Http
                     isCanceled = true;
                 }
 
-                var ros = new ReadOnlySequence<byte>(_readHead, _readIndex, _commitHead, _commitHead.End - _commitHead.Start);
-                return new ReadResult(ros, isCanceled, IsCompletedOrThrow());
+                return new ReadResult(GetCurrentReadOnlySequence(), isCanceled, IsCompletedOrThrow());
             }
         }
 
@@ -288,10 +286,8 @@ namespace Microsoft.AspNetCore.Http
                     }
                 }
 
-                var ros = new ReadOnlySequence<byte>(_readHead, _readIndex, _commitHead, _commitHead.End - _commitHead.Start);
-
                 result = new ReadResult(
-                    ros,
+                    GetCurrentReadOnlySequence(),
                     isCanceled: isCancellationRequested,
                     IsCompletedOrThrow());
                 return true;
@@ -299,6 +295,11 @@ namespace Microsoft.AspNetCore.Http
 
             result = new ReadResult();
             return false;
+        }
+
+        private ReadOnlySequence<byte> GetCurrentReadOnlySequence()
+        {
+            return new ReadOnlySequence<byte>(_readHead, _readIndex, _commitHead, _commitHead.End - _commitHead.Start);
         }
 
         private void AllocateCommitHead()
