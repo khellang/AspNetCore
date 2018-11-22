@@ -138,9 +138,9 @@ namespace Microsoft.AspNetCore.Http
             //  Move _readHead and _readIndex to consumedSegment and index
             if (_consumedLength == 0)
             {
-                _readHead = null;
-                _commitHead = null;
-                returnEnd = null;
+                _commitHead.SetMemory(_commitHead.MemoryOwner);
+                _readHead = _commitHead;
+                returnEnd = _commitHead;
                 _readIndex = 0;
             }
             else if (consumedIndex == returnEnd.Length)
@@ -156,7 +156,7 @@ namespace Microsoft.AspNetCore.Http
                 _readIndex = consumedIndex;
             }
 
-            // Remove all blocks that are freed.
+            // Remove all blocks that are freed (except the last one)
             while (returnStart != null && returnStart != returnEnd)
             {
                 returnStart.ResetMemory();
