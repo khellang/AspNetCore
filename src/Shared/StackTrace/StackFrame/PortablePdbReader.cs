@@ -1,4 +1,4 @@
-﻿// Copyright (c) .NET Foundation. All rights reserved.
+// Copyright (c) .NET Foundation. All rights reserved.
 // Licensed under the Apache License, Version 2.0. See License.txt in the project root for license information.
 
 using System;
@@ -66,60 +66,77 @@ namespace Microsoft.Extensions.StackTrace.Sources
 
         private MetadataReader GetMetadataReader(string assemblyPath)
         {
-            MetadataReaderProvider provider = null;
-            if (!_cache.TryGetValue(assemblyPath, out provider))
-            {
-                var pdbPath = GetPdbPath(assemblyPath);
-
-                if (!string.IsNullOrEmpty(pdbPath) && File.Exists(pdbPath) && IsPortable(pdbPath))
-                {
-                    var pdbStream = File.OpenRead(pdbPath);
-                    provider = MetadataReaderProvider.FromPortablePdbStream(pdbStream);
-                }
-
-                _cache[assemblyPath] = provider;
-            }
-
-            return provider?.GetMetadataReader();
-        }
-
-        private static string GetPdbPath(string assemblyPath)
-        {
             if (string.IsNullOrEmpty(assemblyPath))
             {
                 return null;
             }
 
-            if (File.Exists(assemblyPath))
+            if (_cache.TryGetValue(assemblyPath, out var provider))
             {
-                var peStream = File.OpenRead(assemblyPath);
+                return provider.GetMetadataReader();
+            }
 
-                using (var peReader = new PEReader(peStream))
+            if (TryGetPdbPath(assemblyPath, out var pdbPath) && File.Exists(pdbPath))
+            {
+                var pdbStream = File.OpenRead(pdbPath);
+
+                if (IsPortable(pdbStream))
                 {
-                    foreach (var entry in peReader.ReadDebugDirectory())
-                    {
-                        if (entry.Type == DebugDirectoryEntryType.CodeView)
-                        {
-                            var codeViewData = peReader.ReadCodeViewDebugDirectoryData(entry);
-                            var peDirectory = Path.GetDirectoryName(assemblyPath);
-                            return Path.Combine(peDirectory, Path.GetFileName(codeViewData.Path));
-                        }
-                    }
+                    provider = MetadataReaderProvider.FromPortablePdbStream(pdbStream);
+
+                    _cache[assemblyPath] = provider;
+
+                    return provider.GetMetadataReader();
                 }
             }
 
             return null;
         }
 
-        private static bool IsPortable(string pdbPath)
+        private static bool TryGetPdbPath(string assemblyPath, out string pdbPath)
         {
-            using (var pdbStream = File.OpenRead(pdbPath))
+            if (File.Exists(assemblyPath))
             {
-                return pdbStream.ReadByte() == 'B' &&
-                    pdbStream.ReadByte() == 'S' &&
-                    pdbStream.ReadByte() == 'J' &&
-                    pdbStream.ReadByte() == 'B';
+                var peStream = File.OpenRead(assemblyPath);
+
+                using (var peReader = new PEReader(peStream))
+                {
+                    try
+                    {
+                        foreach (var entry in peReader.ReadDebugDirectory())
+                        {
+                            if (entry.Type == DebugDirectoryEntryType.CodeView)
+                            {
+                                var codeViewData = peReader.ReadCodeViewDebugDirectoryData(entry);
+                                var peDirectory = Path.GetDirectoryName(assemblyPath);
+                                pdbPath = Path.Combine(peDirectory, Path.GetFileName(codeViewData.Path));
+                                return true;
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        pdbPath = default;
+                        return false;
+                    }
+                }
             }
+
+            pdbPath = default;
+            return false;
+        }
+
+        private static bool IsPortable(Stream pdbStream)
+        {
+            var result =
+                pdbStream.ReadByte() == 'B' &&
+                pdbStream.ReadByte() == 'S' &&
+                pdbStream.ReadByte() == 'J' &&
+                pdbStream.ReadByte() == 'B';
+
+            pdbStream.Seek(0, SeekOrigin.Begin);
+
+            return result;
         }
 
         public void Dispose()
