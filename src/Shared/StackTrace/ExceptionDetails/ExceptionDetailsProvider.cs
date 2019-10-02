@@ -7,17 +7,20 @@ using System.IO;
 using System.Linq;
 using System.Reflection;
 using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.Logging;
 
 namespace Microsoft.Extensions.StackTrace.Sources
 {
     internal class ExceptionDetailsProvider
     {
         private readonly IFileProvider _fileProvider;
+        private readonly ILogger _logger;
         private readonly int _sourceCodeLineCount;
 
-        public ExceptionDetailsProvider(IFileProvider fileProvider, int sourceCodeLineCount)
+        public ExceptionDetailsProvider(IFileProvider fileProvider, ILogger logger, int sourceCodeLineCount)
         {
             _fileProvider = fileProvider;
+            _logger = logger;
             _sourceCodeLineCount = sourceCodeLineCount;
         }
 
@@ -30,7 +33,7 @@ namespace Microsoft.Extensions.StackTrace.Sources
                 yield return new ExceptionDetails
                 {
                     Error = ex,
-                    StackFrames = StackTraceHelper.GetFrames(ex)
+                    StackFrames = StackTraceHelper.GetFrames(ex, _logger)
                             .Select(frame => GetStackFrameSourceCodeInfo(
                                 frame.MethodDisplayInfo.ToString(),
                                 frame.FilePath,

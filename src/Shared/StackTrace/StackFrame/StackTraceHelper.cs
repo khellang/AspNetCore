@@ -10,12 +10,13 @@ using System.Reflection;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Internal;
+using Microsoft.Extensions.Logging;
 
 namespace Microsoft.Extensions.StackTrace.Sources
 {
     internal class StackTraceHelper
     {
-        public static IList<StackFrameInfo> GetFrames(Exception exception)
+        public static IList<StackFrameInfo> GetFrames(Exception exception, ILogger logger)
         {
             var frames = new List<StackFrameInfo>();
 
@@ -58,7 +59,7 @@ namespace Microsoft.Extensions.StackTrace.Sources
                     {
                         // .NET Framework and older versions of mono don't support portable PDBs
                         // so we read it manually to get file name and line information
-                        portablePdbReader.PopulateStackFrame(stackFrame, method, frame.GetILOffset());
+                        portablePdbReader.PopulateStackFrame(stackFrame, method, frame.GetILOffset(), logger);
                     }
 
                     frames.Add(stackFrame);

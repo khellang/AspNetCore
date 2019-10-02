@@ -9,6 +9,7 @@ using System.Reflection;
 using System.Reflection.Metadata;
 using System.Reflection.Metadata.Ecma335;
 using System.Reflection.PortableExecutable;
+using Microsoft.Extensions.Logging;
 
 namespace Microsoft.Extensions.StackTrace.Sources
 {
@@ -17,14 +18,14 @@ namespace Microsoft.Extensions.StackTrace.Sources
         private readonly Dictionary<string, MetadataReaderProvider> _cache =
             new Dictionary<string, MetadataReaderProvider>(StringComparer.Ordinal);
 
-        public void PopulateStackFrame(StackFrameInfo frameInfo, MethodBase method, int IlOffset)
+        public void PopulateStackFrame(StackFrameInfo frameInfo, MethodBase method, int IlOffset, ILogger logger)
         {
             if (method.Module.Assembly.IsDynamic)
             {
                 return;
             }
 
-            var metadataReader = GetMetadataReader(method.Module.Assembly.Location);
+            var metadataReader = GetMetadataReader(method.Module.Assembly.Location, logger);
 
             if (metadataReader == null)
             {
@@ -64,7 +65,7 @@ namespace Microsoft.Extensions.StackTrace.Sources
             }
         }
 
-        private MetadataReader GetMetadataReader(string assemblyPath)
+        private MetadataReader GetMetadataReader(string assemblyPath, ILogger logger)
         {
             if (string.IsNullOrEmpty(assemblyPath))
             {
@@ -76,7 +77,7 @@ namespace Microsoft.Extensions.StackTrace.Sources
                 return provider.GetMetadataReader();
             }
 
-            if (TryGetPdbPath(assemblyPath, out var pdbPath) && File.Exists(pdbPath))
+            if (TryGetPdbPath(assemblyPath, logger, out var pdbPath) && File.Exists(pdbPath))
             {
                 var pdbStream = File.OpenRead(pdbPath);
 
@@ -93,7 +94,7 @@ namespace Microsoft.Extensions.StackTrace.Sources
             return null;
         }
 
-        private static bool TryGetPdbPath(string assemblyPath, out string pdbPath)
+        private static bool TryGetPdbPath(string assemblyPath, ILogger logger, out string pdbPath)
         {
             if (File.Exists(assemblyPath))
             {
@@ -114,8 +115,9 @@ namespace Microsoft.Extensions.StackTrace.Sources
                             }
                         }
                     }
-                    catch
+                    catch (Exception e)
                     {
+                        logger?.UnableToReadDebugInfo(assemblyPath, e);
                         pdbPath = default;
                         return false;
                     }
