@@ -5,6 +5,7 @@ using System;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 namespace Microsoft.AspNetCore.Builder
@@ -39,9 +40,20 @@ namespace Microsoft.AspNetCore.Builder
                 throw new ArgumentNullException(nameof(builder));
             }
 
+            if (builder.Properties.ContainsKey(EndpointRouteBuilder))
+            {
+                var logger = builder.ApplicationServices.GetService<ILogger<EndpointRoutingMiddleware>>();
+
+                logger?.LogWarning($"Adding multiple instances of {nameof(EndpointRoutingMiddleware)} has no effect. " +
+                                   $"Consider removing some calls to '{nameof(IApplicationBuilder)}.{nameof(UseRouting)}' to avoid confusion.");
+
+                return builder;
+            }
+
             VerifyRoutingServicesAreRegistered(builder);
 
             var endpointRouteBuilder = new DefaultEndpointRouteBuilder(builder);
+
             builder.Properties[EndpointRouteBuilder] = endpointRouteBuilder;
 
             return builder.UseMiddleware<EndpointRoutingMiddleware>(endpointRouteBuilder);
